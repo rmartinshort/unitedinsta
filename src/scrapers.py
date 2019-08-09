@@ -52,6 +52,8 @@ def scrape_destinations(url=config.UNITEDDESTINATIONS,destfile=config.DESTINATIO
 
         destinations_df['International'] = destinations_df['Country'].apply(lambda x: 0 if 'United States' in x else 1)
 
+        print('-----------\nGeocoding: This could take a while\n-----------')
+
         lats,lons = geocodecities(destinations_df['City'])
 
         destinations_df['LON'] = lons

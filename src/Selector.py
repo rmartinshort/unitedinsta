@@ -25,7 +25,7 @@ class PostSelector():
         self.GL = instaloader.Instaloader(dirname_pattern=config.CITYREPO,download_videos=False,download_video_thumbnails=False)
 
 
-    def select_post(self,download_type='city'):
+    def select_post(self,download_type='city',fromid=0):
 
         '''
         Public
@@ -35,38 +35,32 @@ class PostSelector():
 
         '''
 
-        if download_type == 'city':
+        if download_type in ['city','country']:
 
-            selected_post = self._select_city_post()
+            selected_post = self._select_post_generic(self.cityrepo,self.GL)
 
         elif download_type == 'aircraft':
 
-            selected_post = self._select_aircraft_post()
+            aircraft, models = scrape_fleet()
 
-        elif download_type == 'country':
-
-            selected_post = self._select_city_post()
+            selected_post = self._select_post_generic(self.unitedrepo,self.ACL,\
+                accepted_hashtag_list=models,optional_column_name='aircraft_model',fromid=fromid)
 
         return selected_post
 
 
-    ##
-    # To do 
-    # Make this function more generic so that it can handle any hashtags to match about
-    # any subject
+    def _select_post_generic(self,repo_name,instaloader_instance,
+        accepted_hashtag_list=config.CITYHASHTAGS,optional_column_name=None,debug=True,fromid=0):
 
-    def _select_city_post(self,debug=True) -> pd.DataFrame:
 
-        '''Select a post from the cities collection'''
-
-        posts_info = self._process_posts(fileid=self.cityrepo,L=self.GL)
+        posts_info = self._process_posts(fileid=repo_name,L=instaloader_instance)
 
         posts_info['hashtags'] = posts_info['caption'].apply(self._extract_hashtags)
         posts_info['pcredits'] = posts_info.apply(lambda row: self._extract_pcredits(row),axis=1)
         posts_info['image_size'] = posts_info['Flocation'].apply(self._image_size_check)
 
-        cityscapes = []
-        accepted_hashtags = config.CITYHASHTAGS
+        indicator_column = []
+
 
         for hashtaglist in posts_info['hashtags']:
 
@@ -75,92 +69,91 @@ class PostSelector():
                 tokens = [str(token).replace('#','') for token in hashtaglist]
                 hit = 0
                 for token in tokens:
-                    if token in accepted_hashtags:
-                        cityscapes.append(token)
+                    if token in accepted_hashtag_list:
+                        indicator_column.append(token)
                         hit = 1
                         break
 
                 if hit == 0:
-                    cityscapes.append(np.nan)
+                    indicator_column.append(np.nan)
             
             except:
                 
-                cityscapes.append(np.nan)  
+                indicator_column.append(np.nan) 
 
+        if optional_column_name:
 
-        posts_info['cityscape'] = cityscapes
+            posts_info[optional_column_name] = indicator_column
 
-
-        #This might fail none the posts match the requrired criteria. In that case
-        #we need to fall back to a generic post
-
-        try:
-            chosen_post = posts_info.dropna(subset=['cityscape','image_size']).sample(1)
-        except:
-
-            print('Fall back to generic post')
-
-        if debug == True:
-
-            print(chosen_post['caption'].values[0])
-
-            image = mpimg.imread(chosen_post['Flocation'].values[0])
-            plt.imshow(image)
-            plt.axis('off')
-            plt.savefig('debug_test.png')
-
-        return chosen_post
-
-    def _select_aircraft_post(self,debug=True) -> pd.DataFrame:
-
-        '''Select a post from the aircraft collection'''
-
-        posts_info = self._process_posts(fileid=self.unitedrepo,L=self.ACL)
-
-        aircraft, models = scrape_fleet()
-
-        #print(posts_info)
-
-        posts_info['hashtags'] = posts_info['caption'].apply(self._extract_hashtags)
-        posts_info['pcredits'] = posts_info.apply(lambda row: self._extract_pcredits(row),axis=1)
-        posts_info['image_size'] = posts_info['Flocation'].apply(self._image_size_check)
-
-        aircraft = []
-        for hashtaglist in posts_info['hashtags']:
-            
             try:
-                
-                #print(hashtaglist)
-            
-                tokens = [str(token).replace('#','') for token in hashtaglist]
-                hit = 0
-                for token in tokens:
-                    if token in models:
-                        aircraft.append(token)
-                        hit = 1
-                        break
-
-                if hit == 0:
-                    aircraft.append(np.nan)
-            
+                if fromid == 0:
+                    chosen_post = posts_info.dropna(subset=['image_size']).sample(1)
+                else:
+                    chosen_post = posts_info.dropna(subset=[indicator_column,'image_size']).sample(1)
             except:
-                
-                aircraft.append(np.nan)
+                print('Fall back to backup post')
 
-        posts_info['aircraft_model'] = aircraft
+                chosen_post = self._get_backup_post()
 
-        chosen_post = posts_info.dropna(subset=['aircraft_model','image_size']).sample(1)
+        else:
+
+            posts_info['indicator'] = indicator_column
+
+            try:
+                chosen_post = posts_info.dropna(subset=['indicator','image_size']).sample(1)
+            except:
+               print('Fall back to backup post')
+
+               chosen_post = self._get_backup_post()
 
         if debug == True:
 
             print(chosen_post['caption'].values[0])
+
+            posts_info.dropna(subset=['image_size']).to_csv('Image_size_check.csv')
 
             image = mpimg.imread(chosen_post['Flocation'].values[0])
             plt.imshow(image)
             plt.axis('off')
             plt.savefig('debug_test.png')
 
+        
         return chosen_post
+
+
+    def _get_backup_post(self):
+
+        '''
+        Generate post from set of backup images
+        '''
+
+
+        repo = np.random.choice([config.BACKUP_IMAGES_AIRCRAFT,config.BACKUP_IMAGES_DESTINATIONS])
+
+        post_meta = {
+        'Flocation':[],
+        'caption':[],
+        'pcredits':[],
+        'postdate':[],
+        'image_size':[]
+        }
+            
+        chosen_folder = np.random.choice(glob.glob(f'{repo}/*'))
+
+        image_object = chosen_folder.split('/')[-1]
+        
+        if len(image_object) > 4:
+            image_object = ' '.join(re.findall('[A-Z][a-z]*', image_object))
+            
+        chosen_image = np.random.choice(glob.glob(f'{chosen_folder}/*'))
+        
+        post_meta['Flocation'].append(chosen_image)
+        post_meta['caption'].append(image_object)
+        post_meta['pcredits'].append(np.nan)
+        post_meta['postdate'].append(np.nan)
+        post_meta['image_size'].append(self._image_size_check(chosen_image))
+        
+        return pd.DataFrame(post_meta)
 
 
     def _process_posts(self,fileid,debug=False,L=None) -> pd.DataFrame:
@@ -270,7 +263,7 @@ class PostSelector():
 
         return pcredits
 
-    def _image_size_check(self,image_loc) -> float:
+    def _image_size_check(self,image_loc) -> tuple:
 
         image = mpimg.imread(image_loc)
 
@@ -278,7 +271,7 @@ class PostSelector():
             (h,w,n) = image.shape
         except:
             return np.nan
-        if w < 800:
+        if w < 500:
             return np.nan
         else:
             return (h,w,n)

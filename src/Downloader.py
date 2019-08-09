@@ -45,7 +45,7 @@ class PostDownloader():
                 downloaded, destination, download_type = self._downloadaircraftposts(pt)
 
 
-            return downloaded, destination, download_type, pt
+            return downloaded, destination, download_type, pt, None
 
 
         ## OPTION 2: posting news
@@ -53,9 +53,9 @@ class PostDownloader():
         else:
             pt = "News"
 
-            downloaded, selected_story, download_type = self._selectnews()
+            downloaded, selected_story, download_type, fromid  = self._selectnews()
 
-            return downloaded, selected_story, download_type, pt 
+            return downloaded, selected_story, download_type, pt, fromid 
 
 
 
@@ -101,10 +101,10 @@ class PostDownloader():
 
                 if downloaded == False:
 
-                    downloaded = self._downloadaircraftposts()
+                    downloaded, fromid, download_type= self._downloadaircraftposts()
                     download_type = 'aircraft'
 
-        return downloaded, selected_story, download_type
+        return downloaded, selected_story, download_type, fromid
 
 
 
@@ -173,10 +173,22 @@ class PostDownloader():
         Get posts associated with aircraft
         '''
 
-        downloaded = self._download_posts(downloader=self.ACL,hashtag=hashtag)
+        from_hashtag = np.random.choice([0,1],p=[0.9,0.1])
+
+
+        from_hashtag = 0
+
+        if from_hashtag == 1:
+            downloaded = self._download_posts(downloader=self.ACL,hashtag=hashtag)
+            fromid = 1
+        else:
+            #This needs to be improved
+            downloaded = self._download_posts_from_id()
+            fromid = 0
+
         download_type = 'aircraft'
 
-        return downloaded, None, download_type
+        return downloaded, fromid, download_type
 
 
     def _getfleet(self) -> tuple:
@@ -209,22 +221,58 @@ class PostDownloader():
 
         return news
 
+    def _download_posts_from_id(self,profile_name='fanpage.united',limit=config.POSTLIMIT) -> bool:
+
+        """For downloading insta posts from one profile"""
+
+        print('################################')
+        print('profile name: %s' %profile_name)
+        print('################################')
+
+        posts = instaloader.Profile.from_username(self.ACL.context,profile_name)
+    
+        i = 0
+        try:
+            for post in posts.get_posts():
+                if i < limit:
+                    try:
+                        self.ACL.download_post(post,profile_name)
+                    except:
+                        continue
+                    i += 1
+                else:
+                    break
+        except:
+            if i > 0:
+                return True
+            else:
+                return False
+
+        return True
+
     def _download_posts(self,downloader,limit=config.POSTLIMIT,hashtag='city') -> bool:
 
         '''
         Use instaloader to download post images and metadata
         '''
+
+        print('################################')
+        print('#'+hashtag)
+        print('################################')
     
-        try:
-            i = 0
-            for post in downloader.get_hashtag_posts(hashtag):
+        i = 0
+        for post in downloader.get_hashtag_posts(hashtag):
+
+            try:
                 downloader.download_post(post, target='#'+hashtag)
-                if i >= limit:
-                    break
+            except:
                 i += 1
-            return True
-        except:
-            return False
+            if i >= limit:
+                break
+            i += 1
+
+        return True
+
 
     def _delete_repos(self) -> None:
 
